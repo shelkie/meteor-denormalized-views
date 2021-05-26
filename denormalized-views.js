@@ -251,28 +251,41 @@ export const DenormalizedViews = class DenormalizedViews {
       existingSyncronisation.viewCollection.remove({})
     })
 
-    let ids = existingSyncronisation.sourceCollection.find({}, { fields: { _id: 1 } }).fetch()
-    ids = _.pluck(ids, '_id')
+    let batchSize = 1000;
+    let offset = 0;
+    let totalCount = 0;
+    let ids;
+    do{
 
-    for (const id of ids) {
-      let doc = existingSyncronisation.sourceCollection.findOne(id)  // todo check if we better use data from fetch above
-      const userId = undefined  // TODO: add `Meteor.userId()`. we had problems getting it to work (adding "meteor-base" to packages did not help)
-      // Filter?
-      if (DenormalizedViews._isDocValidToBeProcessed({ doc, userId, syncronisation: existingSyncronisation })) {
-        debug(`refreshAll refreshing doc._id ${id}`)
-        doc = DenormalizedViews._processDoc({
-          doc,
-          syncronisation: existingSyncronisation,
-        })
-        DenormalizedViews._executeDatabaseComand(() => {
-          existingSyncronisation.viewCollection.insert(doc)
-        })
-        DenormalizedViews._callPostHookIfExists({ doc, userId: undefined, postHook: existingSyncronisation.postHook })
-      } else {
-        debug(`refreshAll: filtered out doc._id ${id}`)
+      ids = existingSyncronisation.sourceCollection.find({}, { fields: { _id: 1 }, limit: batchSize, skip: offset }).fetch()
+      ids = _.pluck(ids, '_id')
+
+      for (const id of ids) {
+        try {
+          let doc = existingSyncronisation.sourceCollection.findOne(id)  // todo check if we better use data from fetch above
+          const userId = undefined  // TODO: add `Meteor.userId()`. we had problems getting it to work (adding "meteor-base" to packages did not help)
+          // Filter?
+          if (DenormalizedViews._isDocValidToBeProcessed({doc, userId, syncronisation: existingSyncronisation})) {
+            debug(`refreshAll refreshing doc._id ${id}`)
+            doc = DenormalizedViews._processDoc({
+              doc,
+              syncronisation: existingSyncronisation,
+            })
+            DenormalizedViews._executeDatabaseComand(() => {
+              existingSyncronisation.viewCollection.insert(doc)
+            })
+            DenormalizedViews._callPostHookIfExists({doc, userId: undefined, postHook: existingSyncronisation.postHook})
+          } else {
+            debug(`refreshAll: filtered out doc._id ${id}`)
+          }
+        }catch(e){
+          console.log('DenormalizedViews Error: ', e);
+        }
       }
-    }
-    debug(`${ids.length} docs in cache ${existingSyncronisation.viewCollection._name} were refreshed`)
+      offset += ids.length;
+      totalCount += ids.length
+    }while(ids.length === batchSize);
+    debug(`${totalCount} docs in cache ${existingSyncronisation.viewCollection._name} were refreshed`)
   }
 
   /**
